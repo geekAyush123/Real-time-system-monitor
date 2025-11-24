@@ -224,4 +224,4 @@ with gr.Blocks(title="Multi-Machine Monitor", theme=gr.themes.Soft()) as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7862, share=True)
+    demo.launch(server_name="0.0.0.0", server_port=7863, share=True)

@@ -8,12 +8,6 @@
 **A Distributed System Monitoring Platform**  
 **Using Kafka, Redis, SQLite & Machine Learning**
 
-Submitted by: [Your Name]  
-Roll No: [Your Roll Number]  
-Department: [Your Department]  
-Institution: [Your Institution]
-
-Date: November 2025
 
 </div>
 
@@ -1157,3 +1151,4 @@ netstat -an | findstr 9092
 ---
 
 *This project report demonstrates the successful implementation of a distributed system monitoring platform with machine learning-powered anomaly detection. The system is designed for extensibility, performance, and ease of deployment, making it suitable for a wide range of monitoring scenarios.*
+

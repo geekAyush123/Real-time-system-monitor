@@ -4,9 +4,14 @@
 import gradio as gr
 import pandas as pd
 import sqlite3
-import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+try:
+    from sklearn.ensemble import IsolationForest
+    _ANOMALY_ENABLED = True
+except ImportError:
+    # scikit-learn not installed; anomaly features disabled
+    _ANOMALY_ENABLED = False
 
 def get_db_connection():
     return sqlite3.connect("data/system_metrics.db")
@@ -146,21 +151,122 @@ def get_machine_summary():
     
     return summary
 
+def build_anomaly_dataframe(time_range):
+    """Construct feature dataframe for anomaly detection across all machines."""
+    machines = get_all_machines()
+    rows = []
+    for m in machines:
+        df = get_machine_metrics(m, time_range)
+        if df.empty:
+            continue
+        # Ensure sorted ascending
+        df = df.sort_values('timestamp')
+        # Compute deltas for disk and network
+        df['disk_read_delta'] = df['disk_io_read'].diff().fillna(0)
+        df['disk_write_delta'] = df['disk_io_write'].diff().fillna(0)
+        df['net_sent_delta'] = df['net_io_sent'].diff().fillna(0)
+        df['net_recv_delta'] = df['net_io_recv'].diff().fillna(0)
+        # Take last N (50) samples for modeling
+        sample_df = df.tail(50)
+        for _, r in sample_df.iterrows():
+            rows.append({
+                'machine_id': m,
+                'timestamp': r['timestamp'],
+                'cpu': r['cpu_usage'],
+                'mem': r['memory_usage'],
+                'disk_read_d': r['disk_read_delta'],
+                'disk_write_d': r['disk_write_delta'],
+                'net_sent_d': r['net_sent_delta'],
+                'net_recv_d': r['net_recv_delta']
+            })
+    if not rows:
+        return pd.DataFrame()
+    df_all = pd.DataFrame(rows)
+    return df_all
+
+_model_cache = {
+    'model': None,
+    'trained_rows': 0
+}
+
+def compute_anomalies(time_range):
+    """Return anomaly dataframe with scores and flags. Gracefully degrade if disabled."""
+    if not _ANOMALY_ENABLED:
+        return pd.DataFrame(), "⚠️ scikit-learn not installed. Run: pip install scikit-learn"
+    df_feat = build_anomaly_dataframe(time_range)
+    if df_feat.empty:
+        return pd.DataFrame(), "No data available for anomaly detection."
+    feature_cols = ['cpu','mem','disk_read_d','disk_write_d','net_sent_d','net_recv_d']
+    # Train / retrain if data size changed significantly
+    if (_model_cache['model'] is None) or (abs(len(df_feat) - _model_cache['trained_rows']) > 100):
+        iso = IsolationForest(n_estimators=120, contamination='auto', random_state=42)
+        iso.fit(df_feat[feature_cols])
+        _model_cache['model'] = iso
+        _model_cache['trained_rows'] = len(df_feat)
+    iso = _model_cache['model']
+    scores = iso.decision_function(df_feat[feature_cols])
+    preds = iso.predict(df_feat[feature_cols])  # -1 anomalous, 1 normal
+    df_feat['score'] = scores
+    df_feat['is_anomaly'] = (preds == -1)
+    return df_feat, "Anomaly model applied successfully"
+
+def build_anomaly_summary(df_anom, status_msg):
+    if df_anom.empty:
+        return f"### 🔍 Anomaly Detection\n\n{status_msg}"
+    recent = df_anom.sort_values('timestamp').groupby('machine_id').tail(1)
+    total_anomalies = int(df_anom['is_anomaly'].sum())
+    md = ["### 🔍 Anomaly Detection", f"Status: {status_msg}", f"Total anomalous points (window): {total_anomalies}"]
+    md.append("\n**Latest machine states:**")
+    for _, row in recent.iterrows():
+        flag = "🟢 Normal"
+        if row['is_anomaly']:
+            flag = "🔴 Anomalous"
+        md.append(f"- {row['machine_id']}: {flag} (score {row['score']:.4f})")
+    return "\n".join(md)
+
+def create_anomaly_plot(df_anom):
+    if df_anom.empty:
+        fig = go.Figure()
+        fig.update_layout(title="No anomaly data")
+        return fig
+    # Scatter CPU vs Memory color-coded
+    fig = go.Figure()
+    for m in df_anom['machine_id'].unique():
+        sub = df_anom[df_anom['machine_id']==m]
+        fig.add_trace(go.Scatter(
+            x=sub['cpu'],
+            y=sub['mem'],
+            mode='markers',
+            name=m,
+            marker=dict(
+                size=6,
+                color=['red' if a else 'blue' for a in sub['is_anomaly']],
+                opacity=0.7
+            ),
+            text=sub['timestamp'].astype(str)
+        ))
+    fig.update_layout(
+        title='CPU vs Memory (Red = Anomaly)',
+        xaxis_title='CPU %',
+        yaxis_title='Memory %',
+        template='plotly_white'
+    )
+    return fig
+
 def update_dashboard(time_range):
     """Main dashboard update function"""
-    
-    # Get summary
     summary = get_machine_summary()
-    
-    # Create plots for each metric
     cpu_fig = create_multi_machine_plot('cpu_usage', time_range, 'CPU Usage (%)')
     mem_fig = create_multi_machine_plot('memory_usage', time_range, 'Memory Usage (%)')
     disk_read_fig = create_multi_machine_plot('disk_io_read', time_range, 'Disk Read (bytes)')
     disk_write_fig = create_multi_machine_plot('disk_io_write', time_range, 'Disk Write (bytes)')
     net_sent_fig = create_multi_machine_plot('net_io_sent', time_range, 'Network Sent (bytes)')
     net_recv_fig = create_multi_machine_plot('net_io_recv', time_range, 'Network Received (bytes)')
-    
-    return summary, cpu_fig, mem_fig, disk_read_fig, disk_write_fig, net_sent_fig, net_recv_fig
+    # Anomaly section
+    df_anom, status_msg = compute_anomalies(time_range)
+    anomaly_summary = build_anomaly_summary(df_anom, status_msg)
+    anomaly_plot = create_anomaly_plot(df_anom)
+    return summary, cpu_fig, mem_fig, disk_read_fig, disk_write_fig, net_sent_fig, net_recv_fig, anomaly_summary, anomaly_plot
 
 # Gradio UI
 with gr.Blocks(title="Multi-Machine Monitor", theme=gr.themes.Soft()) as demo:
@@ -209,18 +315,25 @@ with gr.Blocks(title="Multi-Machine Monitor", theme=gr.themes.Soft()) as demo:
             with gr.Column():
                 net_recv_plot = gr.Plot(label="Network Received")
     
+    # Anomaly Tab
+    with gr.Tab("🚨 Anomalies"):
+        with gr.Row():
+            anomaly_md = gr.Markdown(label="Anomaly Summary")
+        with gr.Row():
+            anomaly_plot = gr.Plot(label="Anomaly Scatter")
+
     # Refresh button action
     refresh_btn.click(
         fn=update_dashboard,
         inputs=[time_range],
-        outputs=[summary_md, cpu_plot, mem_plot, disk_read_plot, disk_write_plot, net_sent_plot, net_recv_plot]
+        outputs=[summary_md, cpu_plot, mem_plot, disk_read_plot, disk_write_plot, net_sent_plot, net_recv_plot, anomaly_md, anomaly_plot]
     )
-    
+
     # Auto-load on start
     demo.load(
         fn=update_dashboard,
         inputs=[time_range],
-        outputs=[summary_md, cpu_plot, mem_plot, disk_read_plot, disk_write_plot, net_sent_plot, net_recv_plot]
+        outputs=[summary_md, cpu_plot, mem_plot, disk_read_plot, disk_write_plot, net_sent_plot, net_recv_plot, anomaly_md, anomaly_plot]
     )
 
 if __name__ == "__main__":

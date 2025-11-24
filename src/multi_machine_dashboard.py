@@ -12,10 +12,18 @@ def get_db_connection():
     return sqlite3.connect("data/system_metrics.db")
 
 def get_all_machines():
-    """Get list of all machine IDs"""
+    """Get list of ACTIVE machine IDs (only machines that sent data in last 2 minutes)"""
     try:
         conn = get_db_connection()
-        df = pd.read_sql("SELECT DISTINCT machine_id FROM raw_metrics ORDER BY machine_id", conn)
+        # Only get machines that are actively sending data (last 2 minutes)
+        time_threshold = (datetime.now() - timedelta(minutes=2)).strftime('%Y-%m-%d %H:%M:%S')
+        query = f"""
+            SELECT DISTINCT machine_id 
+            FROM raw_metrics 
+            WHERE timestamp >= '{time_threshold}'
+            ORDER BY machine_id
+        """
+        df = pd.read_sql(query, conn)
         conn.close()
         machines = df['machine_id'].tolist()
         return machines
@@ -93,13 +101,14 @@ def create_multi_machine_plot(metric_name, time_range, metric_label):
     return fig
 
 def get_machine_summary():
-    """Get summary statistics for all machines"""
+    """Get summary statistics for all ACTIVE machines"""
     machines = get_all_machines()
     
     if not machines:
-        return "No machines connected"
+        return "### 🖥️ Connected Machines: 0\n\n❌ No active machines detected.\n\nMake sure producer is running on worker nodes."
     
-    summary = f"### 🖥️ Connected Machines: {len(machines)}\n\n"
+    summary = f"### 🖥️ Connected Machines: {len(machines)}\n"
+    summary += f"*Only showing machines active in last 2 minutes*\n\n"
     
     try:
         conn = get_db_connection()
@@ -215,4 +224,4 @@ with gr.Blocks(title="Multi-Machine Monitor", theme=gr.themes.Soft()) as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7861, share=False)
+    demo.launch(server_name="0.0.0.0", server_port=7862, share=True)

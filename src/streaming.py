@@ -68,7 +68,7 @@ def process_batch(df, epoch_id):
         ts = row['window']['start'].strftime('%Y-%m-%d %H:%M:%S')
         # Store in Redis with TTL
         r.hset(f"metrics:{ts}", mapping={
-            "avg_cpu_usage": row['avg_cpu_usage'],
+            "avg_cpu_usage": row['y avg_cpu_usage'],
             "avg_memory_usage": row['avg_memory_usage']
         })
         r.expire(f"metrics:{ts}", 600) # 10 minutes TTL

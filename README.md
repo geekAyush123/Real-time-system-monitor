@@ -1,142 +1,206 @@
-# Real-Time System Activity Monitoring & Analytics Platform
+<div align="center">
 
-This project is a comprehensive platform for monitoring and analyzing system activity in real-time. It uses a distributed architecture with Python, Kafka, PySpark, Redis, and Streamlit to track, process, and visualize system metrics.
+# Real-Time Multi-Computer System Monitoring & Anomaly Detection
 
-## Features
+Monitor multiple machines in real-time with a lightweight master–worker architecture. Collect CPU, Memory, Disk and Network metrics, store them, visualize trends, and automatically flag anomalies using IsolationForest.
 
-- **Real-Time Monitoring**: Tracks CPU, memory, disk, and network usage every second.
-- **Distributed Processing**: Uses Kafka and PySpark for scalable, high-throughput stream processing.
-- **Real-Time Dashboard**: An interactive Streamlit dashboard visualizes metrics and alerts.
-- **Caching**: Redis provides fast access to recent metrics for the dashboard.
-- **Persistent Storage**: SQLite stores historical data for trend analysis.
-- **Anomaly Detection**: Identifies and alerts on high resource usage (CPU > 90%, Memory > 90%).
-- **Predictive Analytics**: A simple machine learning model predicts future resource usage.
-- **Desktop Notifications**: Sends alerts for critical system events.
+**Technologies:** Python, Kafka, Redis, SQLite, Gradio, (Optional: Spark / Streamlit)  
+**Core Files:** `producer.py`, `simple_consumer.py`, `multi_machine_dashboard.py`  
+**Anomaly Engine:** IsolationForest (scikit-learn)
 
-## Architecture
+</div>
 
-1.  **`producer.py`**: A Python script using `psutil` to collect system metrics and send them to a Kafka topic. You can run multiple instances to simulate monitoring multiple machines.
-2.  **Kafka**: Acts as a message broker, ingesting high-volume logs from producers.
-3.  **`streaming.py`**: A PySpark Structured Streaming application that consumes logs from Kafka, performs aggregations (e.g., 1-minute averages), detects anomalies, and stores results in Redis and SQLite.
-4.  **Redis**: A fast in-memory cache that stores the last 10 minutes of aggregated data for quick retrieval by the dashboard.
-5.  **SQLite**: A lightweight database for long-term storage of historical metrics.
-6.  **`dashboard.py`**: A Streamlit web application that queries Redis and SQLite to display real-time charts, top processes, and alerts.
-7.  **`alerts.py`**: A script that checks for anomalies and sends desktop notifications.
+---
 
-## How to Run
+##  Key Features
 
-### Prerequisites
+- Multi-machine monitoring (workers stream to master Kafka)  
+- Real-time dashboards (Gradio UI with per-machine & aggregated views)  
+- Lightweight storage (SQLite + optional Redis for caching)  
+- Plug & play producers (just point at master IP)  
+- Automatic machine identification (`machine_<n>`)  
+- Anomaly detection tab (IsolationForest: CPU/Memory + I/O/Network deltas)  
+- Extensible design (add alerts, predictive models, Spark streaming)  
+- Simple setup scripts (`setup_worker.py`, PowerShell helpers)  
 
--   Docker and Docker Compose
--   Python 3.8+ and pip
--   Java (for PySpark)
+---
 
-### 1. Setup Environment
+##  Architecture Overview
 
-Clone the repository and install the required Python packages:
+```
+Worker Node 1       Worker Node 2       Worker Node N
+    producer.py         producer.py         producer.py
+	    |                   |                   |
+	    +--------- Kafka (Master IP:9092) ------+
+					  |
+				  simple_consumer.py
+					  |
+			    SQLite / (Redis optional)
+					  |
+			   multi_machine_dashboard.py
+					  |
+				Web UI (Port 7863)
+```
+
+For advanced batch / windowed analytics you can enable `streaming.py` (PySpark Structured Streaming), but the default flow works without Spark.
+
+---
+
+##  Project Structure (Relevant Parts)
+
+```
+src/
+  producer.py              # Collect & send metrics to Kafka
+  simple_consumer.py       # Consumes metrics, stores in SQLite
+  multi_machine_dashboard.py # Gradio multi-machine + anomaly UI
+  gradio_dashboard.py      # Single-machine legacy dashboard
+  database.py              # Initializes SQLite schema
+  cleanup_database.py      # Maintenance script
+  setup_worker.py          # Interactive worker setup utility
+  alerts.py                # (Optional) local notification logic
+data/system_metrics.db     # SQLite database
+docker-compose.yml         # Kafka + Redis services
+```
+
+---
+
+##  Requirements
+
+Install Python 3.8+ then:
 
 ```bash
-git clone https://github.com/geekAyush123/real-time-monitoring.git
-cd real-time-monitoring
 pip install -r requirements.txt
 ```
 
-### 2. Start Infrastructure
+Ensure Docker is installed (for Kafka & optional Redis). If using Spark features: install Java + Spark distribution.
 
-Run the `docker-compose.yml` file to start Kafka and Redis:
+---
+
+##  Quick Start (Single Machine Demo)
 
 ```bash
+# 1. Start Kafka + Redis
 docker-compose up -d
-```
 
-This will start:
-- Zookeeper on port `2181`
-- Kafka on port `9092`
-- Redis on port `6379`
-
-The Kafka container is configured to automatically create the `system_metrics` topic.
-
-### 3. Initialize Database
-
-Run the `database.py` script to create the SQLite database and tables:
-
-```bash
+# 2. Init DB
 python src/database.py
-```
 
-### 4. Start the Components
+# 3. Start consumer (store metrics)
+python src/simple_consumer.py
 
-Open multiple terminal windows to run each component of the platform.
+# 4. Start dashboard (multi-machine capable)
+python src/multi_machine_dashboard.py
 
-**Terminal 1: Start the Stream Processor**
-
-This will listen for messages from Kafka and process them.
-
-```bash
-spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.0 src/streaming.py
-```
-
-**Terminal 2: Start the Producer**
-
-This will start sending your local machine's metrics to Kafka. You can open more terminals and run this command to simulate multiple producers.
-
-```bash
+# 5. Start local producer (same machine)
 python src/producer.py
 ```
 
-**Terminal 3: Start the Alerting Service (Optional)**
+Visit: `http://localhost:7863`  → You will see one machine. Add more producers (even on same machine) to simulate additional hosts.
 
+---
+
+##  Multi-Computer Setup (Master + Workers)
+
+### Master Node Steps
+1. Find IP: `ipconfig` (choose LAN IPv4, e.g. `192.168.1.101`).  
+2. Edit `docker-compose.yml` → set `KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://<MASTER_IP>:9092,...`  
+3. Restart services: `docker-compose down && docker-compose up -d`.  
+4. Open firewall ports (Windows examples):  
+   - 9092 (Kafka), 7863 (Dashboard), 6379 (Redis optional)  
+5. Initialize DB: `python src/database.py`  
+6. Run consumer: `python src/simple_consumer.py`  
+7. Run dashboard: `python src/multi_machine_dashboard.py`  
+
+### Worker Node Steps
+Option A (Automated): Copy `producer.py` + `setup_worker.py`, then:  
 ```bash
-python src/alerts.py
+python setup_worker.py   # enter MASTER_IP when prompted
+python producer.py
 ```
-
-**Terminal 4: Start the Dashboard**
-
+Option B (Manual):  
 ```bash
-streamlit run src/dashboard.py
+pip install psutil kafka-python
+# Edit inside producer.py
+KAFKA_BROKER = '<MASTER_IP>:9092'
+python producer.py
 ```
 
-Now, open your web browser and go to the URL provided by Streamlit (usually `http://localhost:8501`) to see the real-time dashboard.
+Open dashboard from any node: `http://<MASTER_IP>:7863`
 
-## Scaling
+---
 
--   **Kafka**: To handle more producers, you can increase the number of partitions for the `system_metrics` topic. This can be done by modifying the `KAFKA_CREATE_TOPICS` environment variable in `docker-compose.yml` or by using the `kafka-topics.sh` script.
--   **PySpark**: You can scale the stream processing by increasing the number of executors in your Spark cluster. When running locally, you can simulate this by adjusting the `--num-executors` and other configuration flags in the `spark-submit` command. For a production setup, you would run this on a proper Spark cluster (like YARN or Kubernetes).
+##  Anomaly Detection (IsolationForest)
 
-## Tech Stack
+The dashboard builds a feature set per machine using:
+- CPU %, Memory %
+- Δ Disk Read / Write bytes
+- Δ Net Sent / Received bytes
 
-- **Python**: Core programming language
-- **Apache Kafka**: Message streaming platform
-- **Apache Spark**: Distributed computing framework
-- **Redis**: In-memory data store for caching
-- **SQLite**: Lightweight database for persistence
-- **Streamlit**: Web framework for the dashboard
-- **Docker**: Containerization platform
-- **psutil**: System monitoring library
+It keeps a sliding window (~last 50 samples per machine) and trains / retrains an `IsolationForest` when data size changes significantly. Output:
+- Scatter: CPU vs Memory, color-coded (Red = anomaly)
+- Summary: Latest machine state flag (🟢 Normal / 🔴 Anomalous) + raw decision score
 
-## Project Structure
-
+### Tuning
+Edit in `multi_machine_dashboard.py`:
+```python
+IsolationForest(n_estimators=120, contamination='auto', random_state=42)
 ```
-├── src/
-│   ├── producer.py          # System metrics producer
-│   ├── streaming.py         # Spark streaming processor
-│   ├── dashboard.py         # Streamlit dashboard
-│   ├── gradio_dashboard.py  # Alternative Gradio dashboard
-│   ├── database.py          # Database initialization
-│   ├── alerts.py            # Alert system
-│   ├── cache.py             # Redis cache utilities
-│   ├── simple_consumer.py   # Simple Kafka consumer
-│   └── test_pipeline.py     # Pipeline testing
-├── data/
-│   └── system_metrics.db    # SQLite database
-├── jars/                    # Spark JAR dependencies
-├── docker-compose.yml       # Infrastructure setup
-├── requirements.txt         # Python dependencies
-└── README.md               # This file
+You can set `contamination=0.05` to force ~5% anomaly rate or increase estimators for stability.
+
+### Interpreting Scores
+- More negative score → more isolated (potential issue)
+- Frequent anomalies may indicate spikes: CPU saturation, memory pressure or abnormal I/O bursts
+
+### Missing scikit-learn?
+If not installed the Anomaly tab shows a warning. Install:
+```bash
+pip install scikit-learn
 ```
 
-## Contributing
+---
 
-Feel free to fork this repository and submit pull requests for any improvements!
+##  Troubleshooting
+
+| Issue | Checks |
+|-------|--------|
+| Worker not appearing | Ping master, verify `KAFKA_BROKER` string, firewall port 9092 open |
+| Dashboard empty | Confirm consumer running, DB file `data/system_metrics.db` exists |
+| Port already in use | Change `server_port` in `multi_machine_dashboard.py` (e.g. 7864) |
+| Kafka errors | Recreate containers, ensure advertised listener updated to actual IP |
+| Anomaly tab blank | Not enough data yet (need several samples), or scikit-learn missing |
+
+Quick Kafka test from worker:
+```python
+from kafka import KafkaProducer; import json
+p = KafkaProducer(bootstrap_servers=['<MASTER_IP>:9092'], value_serializer=lambda v: json.dumps(v).encode())
+p.send('system_metrics', {'test':'ok'}); p.flush(); print('Sent!')
+```
+
+---
+
+## Scaling & Extensions
+
+- Add PySpark (`streaming.py`) for window aggregations & heavy analytics.
+- Increase Kafka partitions (`KAFKA_CREATE_TOPICS` env or admin script) for high producer counts.
+- Swap SQLite for PostgreSQL / TimescaleDB for long-term multi-GB retention.
+- Add authentication / SSL for Kafka if crossing untrusted networks.
+- Integrate alert pipeline (email / Slack) triggered by anomaly flags.
+
+---
+
+##  Security Notes (Local Dev Focus)
+
+Current setup is LAN-focused (no auth). For production:
+- Enable Kafka SASL/SSL
+- Restrict dashboard port via reverse proxy / auth
+- Harden firewall rules (allow only known worker IPs)
+- Use VPN or secure tunnel for remote workers
+
+---
+
+##  Contributing
+
+PRs welcome for: additional features (Prometheus exporter, process correlation, GPU metrics, ML forecasting). Keep changes modular and documented.
+
 
 

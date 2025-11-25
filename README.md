@@ -24,22 +24,10 @@ Monitor multiple machines in real-time with a lightweight master–worker archit
 - Simple setup scripts (`setup_worker.py`, PowerShell helpers)  
 
 ---
+## ARCHITECTURE OVERVIEW 
+<img width="2291" height="4462" alt="deepseek_mermaid_20251125_c4fc17" src="https://github.com/user-attachments/assets/5bfd092e-1007-4b90-8890-641c7c408220" />
 
-##  Architecture Overview
 
-```
-Worker Node 1       Worker Node 2       Worker Node N
-    producer.py         producer.py         producer.py
-	    |                   |                   |
-	    +--------- Kafka (Master IP:9092) ------+
-					  |
-				  simple_consumer.py
-					  |
-			    SQLite / (Redis optional)
-					  |
-			   multi_machine_dashboard.py
-					  |
-				Web UI (Port 7863)
 ```
 
 For advanced batch / windowed analytics you can enable `streaming.py` (PySpark Structured Streaming), but the default flow works without Spark.
@@ -201,6 +189,7 @@ Current setup is LAN-focused (no auth). For production:
 ##  Contributing
 
 PRs welcome for: additional features (Prometheus exporter, process correlation, GPU metrics, ML forecasting). Keep changes modular and documented.
+
 
 
 
